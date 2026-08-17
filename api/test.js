@@ -1,17 +1,40 @@
-const { dataDB } = require("../lib/firebase");
+const { dataDB, usersDB } = require("../lib/firebase");
 
 module.exports = async (req, res) => {
 
     try {
 
-        const snapshot = await dataDB
+        // App Update data
+        const updateSnapshot = await dataDB
             .ref("AppUpdate")
             .once("value");
+
+        // Users data
+        const usersSnapshot = await usersDB
+            .ref("Users")
+            .once("value");
+
+        const usersData = usersSnapshot.val() || {};
+
+        const users = Object.keys(usersData).map(uid => {
+
+            const user = usersData[uid] || {};
+
+            return {
+                uid: user.uid || uid,
+                username: user.username || "",
+                avatar: user.avatar || ""
+            };
+
+        });
 
         res.status(200).json({
             success: true,
             firebase: "connected",
-            data: snapshot.val()
+
+            data: updateSnapshot.val(),
+
+            users: users
         });
 
     } catch (error) {
@@ -22,5 +45,6 @@ module.exports = async (req, res) => {
             success: false,
             error: error.message
         });
+
     }
 };
