@@ -22,7 +22,7 @@ module.exports = async (req, res) => {
 
             return {
                 uid: user.uid || uid,
-                username: user.username || "",
+                username: user.Username || "",
                 avatar: user.avatar || ""
             };
 
