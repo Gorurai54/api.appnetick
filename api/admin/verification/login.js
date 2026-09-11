@@ -1,101 +1,149 @@
+const crypto = require("crypto");
+
+const cors = require("../../../lib/cors");
 const {
-    createAdminToken,
-    verifyAdminPassword
+    createAdminToken
 } = require("../../../lib/adminAuth");
 
+module.exports = async function handler(req, res) {
 
-export default async function handler(
-    req,
-    res
-) {
+    // CORS
+    if (cors(req, res)) {
+        return;
+    }
 
-    if (
-        req.method !==
-        "POST"
-    ) {
 
-        return res
-            .status(405)
-            .json({
-                success:false,
-                error:
-                    "Method not allowed"
-            });
+    // Only POST
+    if (req.method !== "POST") {
+
+        return res.status(405).json({
+            error: "Method not allowed"
+        });
+
     }
 
 
     try {
 
+        const adminPassword =
+            process.env.VERIFICATION_ADMIN_PASSWORD;
+
+
+        if (!adminPassword) {
+
+            console.error(
+                "VERIFICATION_ADMIN_PASSWORD is missing"
+            );
+
+            return res.status(500).json({
+                error:
+                    "Admin password is not configured on server."
+            });
+
+        }
+
+
+        let body = req.body;
+
+
+        if (typeof body === "string") {
+
+            try {
+                body = JSON.parse(body);
+            } catch (e) {
+                body = {};
+            }
+
+        }
+
+
         const password =
-            req.body &&
-            req.body.password;
+            body &&
+            typeof body.password === "string"
+                ? body.password
+                : "";
+
+
+        if (!password) {
+
+            return res.status(400).json({
+                error:
+                    "Password is required."
+            });
+
+        }
+
+
+        /*
+         * Constant-time comparison
+         */
+
+        const passwordBuffer =
+            Buffer.from(password);
+
+        const correctBuffer =
+            Buffer.from(adminPassword);
+
+
+        let passwordCorrect = false;
 
 
         if (
-            typeof password !==
-            "string" ||
-            !password
+            passwordBuffer.length ===
+            correctBuffer.length
         ) {
 
-            return res
-                .status(400)
-                .json({
-                    success:false,
-                    error:
-                        "Password is required."
-                });
+            passwordCorrect =
+                crypto.timingSafeEqual(
+                    passwordBuffer,
+                    correctBuffer
+                );
+
         }
 
 
-        const valid =
-            verifyAdminPassword(
-                password
-            );
+        if (!passwordCorrect) {
 
+            return res.status(401).json({
+                error:
+                    "Invalid admin password."
+            });
 
-        if (!valid) {
-
-            return res
-                .status(401)
-                .json({
-                    success:false,
-                    error:
-                        "Incorrect admin password."
-                });
         }
 
+
+        /*
+         * Create short-lived admin token
+         */
 
         const token =
             createAdminToken();
 
 
-        return res
-            .status(200)
-            .json({
+        return res.status(200).json({
 
-                success:true,
+            success: true,
 
-                token,
+            token: token,
 
-                expiresIn:
-                    2 * 60 * 60
+            expiresIn: 7200
 
-            });
+        });
+
 
     } catch (error) {
 
         console.error(
-            "Verification admin login:",
+            "ADMIN LOGIN ERROR:",
             error
         );
 
 
-        return res
-            .status(500)
-            .json({
-                success:false,
-                error:
-                    "Authentication system error."
-            });
+        return res.status(500).json({
+            error:
+                "Internal server error."
+        });
+
     }
-}
+
+};
