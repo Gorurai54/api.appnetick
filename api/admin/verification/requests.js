@@ -2,42 +2,67 @@ const {
     dataDB
 } = require("../../../lib/firebase");
 
-
 const {
     requireAdmin
 } = require("../../../lib/adminAuth");
 
-
-export default async function handler(
-    req,
-    res
-) {
-
-    if (
-        req.method !==
-        "GET"
-    ) {
-
-        return res
-            .status(405)
-            .json({
-                success:false,
-                error:
-                    "Method not allowed"
-            });
-    }
+const cors =
+    require("../../../lib/cors");
 
 
-    if (
-        !requireAdmin(
-            req,
-            res
-        )
-    ) {
+module.exports = async function handler(req, res) {
 
+    /*
+     * CORS
+     */
+
+    if (cors(req, res)) {
         return;
     }
 
+
+    /*
+     * Only GET
+     */
+
+    if (req.method !== "GET") {
+
+        return res.status(405).json({
+            error: "Method not allowed"
+        });
+
+    }
+
+
+    /*
+     * ADMIN AUTH
+     */
+
+    try {
+
+        requireAdmin(req);
+
+    } catch (error) {
+
+        console.error(
+            "ADMIN AUTH ERROR:",
+            error
+        );
+
+        return res.status(401).json({
+
+            error:
+                error.message ||
+                "Unauthorized"
+
+        });
+
+    }
+
+
+    /*
+     * FIREBASE / DATAAPP
+     */
 
     try {
 
@@ -46,108 +71,121 @@ export default async function handler(
                 .ref(
                     "VerificationRequests"
                 )
-                .once(
-                    "value"
-                );
+                .once("value");
 
 
-        const raw =
-            snapshot.val() || {};
+        const value =
+            snapshot.val();
 
+
+        /*
+         * No verification requests
+         */
+
+        if (!value) {
+
+            return res.status(200).json({
+
+                requests: []
+
+            });
+
+        }
+
+
+        /*
+         * Convert Firebase object
+         * into array
+         */
 
         const requests =
-            Object.entries(
-                raw
-            )
-            .map(
-                ([key, value]) => ({
+            Object.keys(value)
+                .map(
+                    function(uid) {
 
-                    requestId:
-                        key,
+                        const request =
+                            value[uid];
 
-                    ...value
 
-                })
-            );
+                        if (
+                            !request ||
+                            typeof request !==
+                            "object"
+                        ) {
 
+                            return null;
+
+                        }
+
+
+                        return {
+
+                            ...request,
+
+                            uid:
+                                request.uid ||
+                                uid
+
+                        };
+
+                    }
+                )
+                .filter(Boolean);
+
+
+        /*
+         * Newest requests first
+         */
 
         requests.sort(
-            (a, b) => {
+            function(a,b) {
 
-                const statusA =
-                    (
-                        a.verification_status ||
-                        "pending"
-                    ).toLowerCase();
-
-                const statusB =
-                    (
-                        b.verification_status ||
-                        "pending"
-                    ).toLowerCase();
-
-
-                if (
-                    statusA ===
-                    "pending" &&
-                    statusB !==
-                    "pending"
-                ) {
-
-                    return -1;
-                }
-
-
-                if (
-                    statusA !==
-                    "pending" &&
-                    statusB ===
-                    "pending"
-                ) {
-
-                    return 1;
-                }
-
-
-                return (
-                    Number(
-                        b.submitted_at ||
-                        0
-                    ) -
+                const aTime =
                     Number(
                         a.submitted_at ||
                         0
-                    )
-                );
+                    );
+
+
+                const bTime =
+                    Number(
+                        b.submitted_at ||
+                        0
+                    );
+
+
+                return bTime - aTime;
 
             }
         );
 
 
-        return res
-            .status(200)
-            .json({
+        return res.status(200).json({
 
-                success:true,
+            requests: requests
 
-                requests
+        });
 
-            });
 
     } catch (error) {
 
         console.error(
-            "Verification requests:",
+            "FIREBASE VERIFICATION REQUEST ERROR:",
             error
         );
 
 
-        return res
-            .status(500)
-            .json({
-                success:false,
-                error:
-                    "Unable to load verification requests."
-            });
+        return res.status(500).json({
+
+            error:
+                "Unable to fetch verification requests.",
+
+            details:
+                error.message ||
+                ""
+
+        });
+
     }
-}
+
+};
