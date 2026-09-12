@@ -3,81 +3,101 @@ const {
     usersDB
 } = require("../../../lib/firebase");
 
-
 const {
     requireAdmin
 } = require("../../../lib/adminAuth");
 
 
-export default async function handler(
-    req,
-    res
-) {
+module.exports = async function handler(req, res) {
 
-    if (
-        req.method !==
-        "POST"
-    ) {
+    // =====================================================
+    // METHOD
+    // =====================================================
+
+    if (req.method !== "POST") {
 
         return res
             .status(405)
             .json({
-                success:false,
-                error:
-                    "Method not allowed"
+                success: false,
+                error: "Method not allowed"
             });
     }
 
 
-    if (
-        !requireAdmin(
-            req,
-            res
-        )
-    ) {
+    // =====================================================
+    // ADMIN AUTH
+    // =====================================================
 
+    if (!requireAdmin(req, res)) {
         return;
     }
 
 
     try {
 
-        const body =
-            req.body || {};
+        const body = req.body || {};
 
+
+        // =====================================================
+        // INPUT
+        // =====================================================
 
         const uid =
-            typeof body.uid ===
-            "string"
+            typeof body.uid === "string"
                 ? body.uid.trim()
                 : "";
 
 
         const action =
-            typeof body.action ===
-            "string"
-                ? body.action
+            typeof body.action === "string"
+                ? body.action.trim().toLowerCase()
                 : "";
 
 
         const reason =
-            typeof body.reason ===
-            "string"
+            typeof body.reason === "string"
                 ? body.reason.trim()
                 : "";
 
+
+        // =====================================================
+        // VALIDATE UID
+        // =====================================================
 
         if (!uid) {
 
             return res
                 .status(400)
                 .json({
-                    success:false,
-                    error:
-                        "UID is required."
+                    success: false,
+                    error: "UID is required."
                 });
         }
 
+
+        // Firebase path safety
+
+        if (
+            uid.includes(".") ||
+            uid.includes("#") ||
+            uid.includes("$") ||
+            uid.includes("[") ||
+            uid.includes("]")
+        ) {
+
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    error: "Invalid UID."
+                });
+        }
+
+
+        // =====================================================
+        // VALIDATE ACTION
+        // =====================================================
 
         if (
             action !== "approve" &&
@@ -87,12 +107,15 @@ export default async function handler(
             return res
                 .status(400)
                 .json({
-                    success:false,
-                    error:
-                        "Invalid action."
+                    success: false,
+                    error: "Invalid action."
                 });
         }
 
+
+        // =====================================================
+        // REJECTION REASON
+        // =====================================================
 
         if (
             action === "reject" &&
@@ -102,12 +125,15 @@ export default async function handler(
             return res
                 .status(400)
                 .json({
-                    success:false,
-                    error:
-                        "Decline reason is required."
+                    success: false,
+                    error: "Decline reason is required."
                 });
         }
 
+
+        // =====================================================
+        // LOAD VERIFICATION REQUEST
+        // =====================================================
 
         const requestRef =
             dataDB.ref(
@@ -115,141 +141,208 @@ export default async function handler(
             );
 
 
-        const snapshot =
-            await requestRef
-                .once(
-                    "value"
-                );
+        const requestSnapshot =
+            await requestRef.once("value");
 
 
-        if (
-            !snapshot.exists()
-        ) {
+        if (!requestSnapshot.exists()) {
 
             return res
                 .status(404)
                 .json({
-                    success:false,
+                    success: false,
                     error:
                         "Verification request not found."
                 });
         }
 
 
-        const now =
-            Date.now();
+        const requestData =
+            requestSnapshot.val() || {};
 
 
-        /* =====================================================
-           APPROVE
-        ===================================================== */
+        // =====================================================
+        // CHECK CURRENT STATUS
+        // =====================================================
+
+        const currentStatus =
+            String(
+                requestData.verification_status || ""
+            ).toLowerCase();
+
+
+        // Prevent approving/rejecting an already
+        // completed request accidentally.
 
         if (
-            action ===
-            "approve"
+            currentStatus === "approved" ||
+            currentStatus === "rejected"
         ) {
 
-            await requestRef
-                .update({
-
-                    verification_status:
-                        "approved",
-
-                    reviewed_at:
-                        now,
-
-                    reviewed_by:
-                        "verification_admin",
-
-                    rejection_reason:
-                        ""
-
+            return res
+                .status(409)
+                .json({
+                    success: false,
+                    error:
+                        `This verification request is already ${currentStatus}.`
                 });
+        }
 
 
-            await usersDB
-                .ref(
-                    `Users/${uid}`
-                )
-                .update({
+        // =====================================================
+        // CHECK USER EXISTS
+        // =====================================================
 
-                    verified:
-                        true,
+        const userRef =
+            usersDB.ref(
+                `Users/${uid}`
+            );
 
-                    verification_status:
-                        "approved",
 
-                    verification_verified_at:
-                        now
+        const userSnapshot =
+            await userRef.once("value");
 
+
+        if (!userSnapshot.exists()) {
+
+            return res
+                .status(404)
+                .json({
+                    success: false,
+                    error:
+                        "User account not found."
                 });
+        }
+
+
+        const now = Date.now();
+
+
+        // =====================================================
+        // APPROVE
+        // =====================================================
+
+        if (action === "approve") {
+
+            /*
+             * Update both locations.
+             *
+             * DataApp:
+             * VerificationRequests/{uid}
+             *
+             * Users DB:
+             * Users/{uid}
+             */
+
+            await requestRef.update({
+
+                verification_status:
+                    "approved",
+
+                reviewed_at:
+                    now,
+
+                reviewed_by:
+                    "verification_admin",
+
+                rejection_reason:
+                    ""
+
+            });
+
+
+            await userRef.update({
+
+                // Main verification badge flag
+                verified:
+                    true,
+
+                // Compatibility with Android app
+                verify:
+                    true,
+
+                verification_status:
+                    "approved",
+
+                verification_verified_at:
+                    now
+
+            });
 
 
             return res
                 .status(200)
                 .json({
 
-                    success:true,
+                    success: true,
 
                     status:
-                        "approved"
+                        "approved",
+
+                    message:
+                        "Verification approved successfully."
 
                 });
         }
 
 
-        /* =====================================================
-           REJECT
-        ===================================================== */
+        // =====================================================
+        // REJECT
+        // =====================================================
 
-        await requestRef
-            .update({
+        await requestRef.update({
 
-                verification_status:
-                    "rejected",
+            verification_status:
+                "rejected",
 
-                rejection_reason:
-                    reason,
+            rejection_reason:
+                reason,
 
-                reviewed_at:
-                    now,
+            reviewed_at:
+                now,
 
-                reviewed_by:
-                    "verification_admin"
+            reviewed_by:
+                "verification_admin"
 
-            });
+        });
 
 
-        await usersDB
-            .ref(
-                `Users/${uid}`
-            )
-            .update({
+        await userRef.update({
 
-                verification_status:
-                    "rejected",
+            verified:
+                false,
 
-                verification_rejected_at:
-                    now
+            verify:
+                false,
 
-            });
+            verification_status:
+                "rejected",
+
+            verification_rejected_at:
+                now
+
+        });
 
 
         return res
             .status(200)
             .json({
 
-                success:true,
+                success: true,
 
                 status:
-                    "rejected"
+                    "rejected",
+
+                message:
+                    "Verification request rejected."
 
             });
+
 
     } catch (error) {
 
         console.error(
-            "Verification review:",
+            "Verification review error:",
             error
         );
 
@@ -257,9 +350,12 @@ export default async function handler(
         return res
             .status(500)
             .json({
-                success:false,
+
+                success: false,
+
                 error:
                     "Unable to update verification request."
+
             });
     }
-}
+};
