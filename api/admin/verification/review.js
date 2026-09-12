@@ -7,8 +7,22 @@ const {
     requireAdmin
 } = require("../../../lib/adminAuth");
 
+const cors = require("../../../lib/cors");
+
 
 module.exports = async function handler(req, res) {
+
+    // =====================================================
+    // CORS
+    // IMPORTANT:
+    // This must run BEFORE method checking.
+    // It handles browser OPTIONS preflight.
+    // =====================================================
+
+    if (cors(req, res)) {
+        return;
+    }
+
 
     // =====================================================
     // METHOD
@@ -36,12 +50,13 @@ module.exports = async function handler(req, res) {
 
     try {
 
-        const body = req.body || {};
+        const body =
+            req.body || {};
 
 
-        // =====================================================
+        // =================================================
         // INPUT
-        // =====================================================
+        // =================================================
 
         const uid =
             typeof body.uid === "string"
@@ -61,9 +76,9 @@ module.exports = async function handler(req, res) {
                 : "";
 
 
-        // =====================================================
-        // VALIDATE UID
-        // =====================================================
+        // =================================================
+        // UID VALIDATION
+        // =================================================
 
         if (!uid) {
 
@@ -76,7 +91,7 @@ module.exports = async function handler(req, res) {
         }
 
 
-        // Firebase path safety
+        // Firebase key safety
 
         if (
             uid.includes(".") ||
@@ -95,9 +110,9 @@ module.exports = async function handler(req, res) {
         }
 
 
-        // =====================================================
-        // VALIDATE ACTION
-        // =====================================================
+        // =================================================
+        // ACTION VALIDATION
+        // =================================================
 
         if (
             action !== "approve" &&
@@ -113,9 +128,9 @@ module.exports = async function handler(req, res) {
         }
 
 
-        // =====================================================
+        // =================================================
         // REJECTION REASON
-        // =====================================================
+        // =================================================
 
         if (
             action === "reject" &&
@@ -126,14 +141,15 @@ module.exports = async function handler(req, res) {
                 .status(400)
                 .json({
                     success: false,
-                    error: "Decline reason is required."
+                    error:
+                        "Decline reason is required."
                 });
         }
 
 
-        // =====================================================
-        // LOAD VERIFICATION REQUEST
-        // =====================================================
+        // =================================================
+        // VERIFICATION REQUEST
+        // =================================================
 
         const requestRef =
             dataDB.ref(
@@ -161,18 +177,19 @@ module.exports = async function handler(req, res) {
             requestSnapshot.val() || {};
 
 
-        // =====================================================
-        // CHECK CURRENT STATUS
-        // =====================================================
+        // =================================================
+        // CURRENT STATUS
+        // =================================================
 
         const currentStatus =
             String(
                 requestData.verification_status || ""
-            ).toLowerCase();
+            )
+            .toLowerCase()
+            .trim();
 
 
-        // Prevent approving/rejecting an already
-        // completed request accidentally.
+        // Don't process already reviewed requests
 
         if (
             currentStatus === "approved" ||
@@ -189,9 +206,9 @@ module.exports = async function handler(req, res) {
         }
 
 
-        // =====================================================
-        // CHECK USER EXISTS
-        // =====================================================
+        // =================================================
+        // USER
+        // =================================================
 
         const userRef =
             usersDB.ref(
@@ -215,24 +232,19 @@ module.exports = async function handler(req, res) {
         }
 
 
-        const now = Date.now();
+        const now =
+            Date.now();
 
 
-        // =====================================================
+        // =================================================
         // APPROVE
-        // =====================================================
+        // =================================================
 
         if (action === "approve") {
 
-            /*
-             * Update both locations.
-             *
-             * DataApp:
-             * VerificationRequests/{uid}
-             *
-             * Users DB:
-             * Users/{uid}
-             */
+            // ---------------------------------------------
+            // Verification request
+            // ---------------------------------------------
 
             await requestRef.update({
 
@@ -251,13 +263,17 @@ module.exports = async function handler(req, res) {
             });
 
 
+            // ---------------------------------------------
+            // User account
+            // ---------------------------------------------
+
             await userRef.update({
 
-                // Main verification badge flag
+                // Current badge flag
                 verified:
                     true,
 
-                // Compatibility with Android app
+                // Android compatibility
                 verify:
                     true,
 
@@ -286,9 +302,9 @@ module.exports = async function handler(req, res) {
         }
 
 
-        // =====================================================
+        // =================================================
         // REJECT
-        // =====================================================
+        // =================================================
 
         await requestRef.update({
 
