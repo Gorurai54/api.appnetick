@@ -33,6 +33,24 @@ function safeString(value) {
 }
 
 
+function normalizeEmail(value) {
+
+    return String(value || "")
+        .trim()
+        .toLowerCase();
+
+}
+
+
+function isValidEmail(email) {
+
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+        email
+    );
+
+}
+
+
 function getRequestBody(req) {
 
     if (!req.body) {
@@ -69,6 +87,46 @@ function generateStatusCode() {
     let result = "";
 
     while (result.length < 12) {
+
+        const byte =
+            crypto.randomBytes(1)[0];
+
+        /*
+         * Avoid modulo bias.
+         */
+
+        if (byte >= 250) {
+            continue;
+        }
+
+        result += String(
+            byte % 10
+        );
+
+    }
+
+    return result;
+
+}
+
+
+/*
+============================================================
+18 DIGIT PRIVATE VERIFICATION KEY
+============================================================
+
+Generated server-side only.
+
+Raw key is NEVER stored in Firebase.
+
+============================================================
+*/
+
+function generateVerificationKey() {
+
+    let result = "";
+
+    while (result.length < 18) {
 
         const byte =
             crypto.randomBytes(1)[0];
@@ -380,8 +438,8 @@ Never expose:
 
 - private verification key
 - verification_key_hash
+- status code
 - status code hash
-- internal key record
 ============================================================
 */
 
@@ -516,11 +574,6 @@ async function sendCustomEmail({
                         type:
                             "custom",
 
-                        /*
-                         * send-otp.js custom branch
-                         * checks this value.
-                         */
-
                         admin_secret:
                             secret,
 
@@ -636,7 +689,7 @@ module.exports =
                 .status(405)
                 .json({
 
-                    success:false,
+                    success: false,
 
                     error:
                         "Method not allowed."
@@ -660,7 +713,7 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Username is required."
@@ -686,7 +739,7 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "INVALID_USERNAME",
@@ -711,13 +764,39 @@ module.exports =
                     .status(200)
                     .json({
 
-                        success:true,
+                        success: true,
 
-                        exists:false
+                        exists: false
 
                     });
 
             }
+
+
+            /*
+            ------------------------------------------------
+            DO NOT expose account email here.
+            ------------------------------------------------
+            */
+
+            const safeUser = {
+
+                uid:
+                    user.uid,
+
+                username:
+                    user.username,
+
+                full_name:
+                    user.full_name,
+
+                avatar:
+                    user.avatar,
+
+                verified:
+                    user.verified
+
+            };
 
 
             const verificationSnapshot =
@@ -748,11 +827,12 @@ module.exports =
                 .status(200)
                 .json({
 
-                    success:true,
+                    success: true,
 
-                    exists:true,
+                    exists: true,
 
-                    user:user,
+                    user:
+                        safeUser,
 
                     verification:
                         verification
@@ -772,7 +852,7 @@ module.exports =
                 .status(500)
                 .json({
 
-                    success:false,
+                    success: false,
 
                     error:
                         "Unable to check username."
@@ -820,7 +900,7 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "A valid 12-digit status code is required."
@@ -852,9 +932,9 @@ module.exports =
                     .status(404)
                     .json({
 
-                        success:false,
+                        success: false,
 
-                        exists:false,
+                        exists: false,
 
                         error:
                             "Invalid or unknown verification status code."
@@ -889,7 +969,7 @@ module.exports =
                     .status(500)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Verification status record is invalid."
@@ -915,9 +995,9 @@ module.exports =
                     .status(404)
                     .json({
 
-                        success:false,
+                        success: false,
 
-                        exists:false,
+                        exists: false,
 
                         error:
                             "Verification application not found."
@@ -942,7 +1022,7 @@ module.exports =
                     .status(409)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Verification status record does not match the application."
@@ -968,9 +1048,9 @@ module.exports =
                     .status(404)
                     .json({
 
-                        success:false,
+                        success: false,
 
-                        exists:false,
+                        exists: false,
 
                         error:
                             "Appnetick account not found."
@@ -1015,9 +1095,9 @@ module.exports =
                 .status(200)
                 .json({
 
-                    success:true,
+                    success: true,
 
-                    exists:true,
+                    exists: true,
 
                     user:
                         safeUser,
@@ -1042,7 +1122,7 @@ module.exports =
                 .status(500)
                 .json({
 
-                    success:false,
+                    success: false,
 
                     error:
                         "Unable to fetch verification status."
@@ -1122,7 +1202,7 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "A valid 12-digit status code is required."
@@ -1140,7 +1220,7 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "A valid 18-digit private verification key is required."
@@ -1178,7 +1258,7 @@ module.exports =
                     .status(404)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Invalid verification status code."
@@ -1213,7 +1293,7 @@ module.exports =
                     .status(500)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Verification record is invalid."
@@ -1247,7 +1327,7 @@ module.exports =
                     .status(404)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Verification application not found."
@@ -1278,7 +1358,7 @@ module.exports =
                     .status(409)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Verification request mismatch."
@@ -1311,7 +1391,7 @@ module.exports =
                     .status(409)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "NOT_APPROVED",
@@ -1339,7 +1419,7 @@ module.exports =
                     .status(409)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "KEY_ALREADY_USED",
@@ -1367,7 +1447,7 @@ module.exports =
                     .status(409)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "This private verification key is no longer active."
@@ -1438,7 +1518,7 @@ module.exports =
                     .status(401)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "INVALID_PRIVATE_KEY",
@@ -1475,7 +1555,7 @@ module.exports =
                     .status(404)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         error:
                             "Appnetick account not found."
@@ -1540,7 +1620,7 @@ module.exports =
 
             /*
             =================================================
-            DISABLE STATUS CODE FOR ACTIVATION
+            DISABLE STATUS CODE
             =================================================
             */
 
@@ -1572,9 +1652,9 @@ module.exports =
                 .status(200)
                 .json({
 
-                    success:true,
+                    success: true,
 
-                    verified:true,
+                    verified: true,
 
                     status:
                         "verified",
@@ -1597,7 +1677,7 @@ module.exports =
                 .status(500)
                 .json({
 
-                    success:false,
+                    success: false,
 
                     error:
                         "Unable to activate verification."
@@ -1644,7 +1724,7 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "INVALID_USERNAME",
@@ -1666,13 +1746,67 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "INVALID_USERNAME",
 
                         error:
                             "Invalid username."
+
+                    });
+
+            }
+
+
+            /*
+            =================================================
+            USER-ENTERED EMAIL
+            =================================================
+            */
+
+            const applicantEmail =
+                normalizeEmail(
+                    body.email
+                );
+
+
+            if (!applicantEmail) {
+
+                return res
+                    .status(400)
+                    .json({
+
+                        success: false,
+
+                        code:
+                            "EMAIL_REQUIRED",
+
+                        error:
+                            "Email address is required."
+
+                    });
+
+            }
+
+
+            if (
+                !isValidEmail(
+                    applicantEmail
+                )
+            ) {
+
+                return res
+                    .status(400)
+                    .json({
+
+                        success: false,
+
+                        code:
+                            "INVALID_EMAIL",
+
+                        error:
+                            "Please enter a valid email address."
 
                     });
 
@@ -1697,7 +1831,7 @@ module.exports =
                     .status(404)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "USERNAME_NOT_FOUND",
@@ -1724,7 +1858,7 @@ module.exports =
                     .status(409)
                     .json({
 
-                        success:false,
+                        success: false,
 
                         code:
                             "ALREADY_APPROVED",
@@ -1778,7 +1912,7 @@ module.exports =
                         .status(409)
                         .json({
 
-                            success:false,
+                            success: false,
 
                             code:
                                 "ALREADY_PENDING",
@@ -1799,7 +1933,7 @@ module.exports =
                         .status(409)
                         .json({
 
-                            success:false,
+                            success: false,
 
                             code:
                                 "ALREADY_APPROVED",
@@ -1830,51 +1964,13 @@ module.exports =
                     .status(400)
                     .json({
 
-                        success:false,
+                        success: false,
+
+                        code:
+                            "CONFIRMATIONS_REQUIRED",
 
                         error:
                             "All confirmations are required."
-
-                    });
-
-            }
-
-
-            /*
-            =================================================
-            ACCOUNT EMAIL
-            =================================================
-
-            The email from Users is authoritative.
-
-            =================================================
-            */
-
-            const applicantEmail =
-                safeString(
-                    actualUser.email
-                )
-                .toLowerCase();
-
-
-            if (
-                !applicantEmail ||
-                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-                    applicantEmail
-                )
-            ) {
-
-                return res
-                    .status(400)
-                    .json({
-
-                        success:false,
-
-                        code:
-                            "ACCOUNT_EMAIL_MISSING",
-
-                        error:
-                            "The Appnetick account does not have a valid email address."
 
                     });
 
@@ -1929,6 +2025,11 @@ module.exports =
                     safeString(
                         body.legal_name
                     ),
+
+                /*
+                 * IMPORTANT:
+                 * This is the EMAIL ENTERED by the applicant.
+                 */
 
                 email:
                     applicantEmail,
@@ -2023,8 +2124,8 @@ module.exports =
                     "",
 
                 /*
-                 * Private verification key fields.
-                 * These will be filled only after admin approval.
+                 * Private verification key.
+                 * Generated only after approval.
                  */
 
                 verification_key_status:
@@ -2076,7 +2177,7 @@ module.exports =
             SAVE STATUS CODE MAPPING
             =================================================
 
-            Raw code is NEVER stored.
+            Raw 12-digit code is NEVER stored.
 
             =================================================
             */
@@ -2176,14 +2277,15 @@ module.exports =
                 Application remains saved.
                 ------------------------------------------------
 
-                Return code once because email failed.
+                Since the email failed, return the status code
+                once so the applicant is not locked out.
                 */
 
                 return res
                     .status(200)
                     .json({
 
-                        success:true,
+                        success: true,
 
                         username:
                             actualUser.username,
@@ -2196,6 +2298,9 @@ module.exports =
 
                         status_code:
                             statusCode,
+
+                        email:
+                            applicantEmail,
 
                         message:
                             "Application submitted, but the status code email could not be sent. Please save your status code."
@@ -2215,7 +2320,7 @@ module.exports =
                 .status(200)
                 .json({
 
-                    success:true,
+                    success: true,
 
                     username:
                         actualUser.username,
@@ -2226,8 +2331,11 @@ module.exports =
                     email_sent:
                         true,
 
+                    email:
+                        applicantEmail,
+
                     message:
-                        "Verification application submitted successfully. Your 12-digit status code has been sent to your email."
+                        "Verification application submitted successfully. Your 12-digit status code has been sent to the email address you entered."
 
                 });
 
@@ -2248,7 +2356,7 @@ module.exports =
 
             /*
             ------------------------------------------------
-            Do NOT expose Firebase internals to client.
+            Do NOT expose Firebase internals.
             ------------------------------------------------
             */
 
@@ -2256,7 +2364,7 @@ module.exports =
                 .status(500)
                 .json({
 
-                    success:false,
+                    success: false,
 
                     code:
                         "SUBMIT_FAILED",
@@ -2287,7 +2395,7 @@ module.exports =
             .status(405)
             .json({
 
-                success:false,
+                success: false,
 
                 error:
                     "Method not allowed."
@@ -2307,7 +2415,7 @@ module.exports =
         .status(400)
         .json({
 
-            success:false,
+            success: false,
 
             error:
                 "Invalid verification action."
