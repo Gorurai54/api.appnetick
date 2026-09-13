@@ -7,9 +7,11 @@ const {
     requireAdmin
 } = require("../../../lib/adminAuth");
 
-const cors = require("../../../lib/cors");
+const cors =
+    require("../../../lib/cors");
 
-const crypto = require("crypto");
+const crypto =
+    require("crypto");
 
 
 // =====================================================
@@ -45,6 +47,19 @@ function generatePrivateKey() {
 
 
 // =====================================================
+// HASH PRIVATE KEY
+// =====================================================
+
+function hashPrivateKey(key) {
+
+    return crypto
+        .createHash("sha256")
+        .update(key)
+        .digest("hex");
+}
+
+
+// =====================================================
 // SEND CUSTOM EMAIL
 // =====================================================
 
@@ -57,17 +72,29 @@ async function sendCustomEmail({
     footer_message
 }) {
 
-    const baseUrl =
-        process.env.APP_BASE_URL ||
-        process.env.VERCEL_URL
-            ? `https://${process.env.VERCEL_URL}`
-            : "";
+    const appBaseUrl =
+        String(
+            process.env.APP_BASE_URL ||
+            ""
+        )
+        .trim()
+        .replace(/\/+$/, "");
 
 
-    const endpoint =
-        process.env.APP_BASE_URL
-            ? `${process.env.APP_BASE_URL}/api/send-otp`
-            : `${baseUrl}/api/send-otp`;
+    let endpoint = "";
+
+
+    if (appBaseUrl) {
+
+        endpoint =
+            `${appBaseUrl}/api/send-otp`;
+
+    } else if (process.env.VERCEL_URL) {
+
+        endpoint =
+            `https://${process.env.VERCEL_URL}/api/send-otp`;
+
+    }
 
 
     const secret =
@@ -96,9 +123,11 @@ async function sendCustomEmail({
             method: "POST",
 
             headers: {
+
                 "Content-Type":
                     "application/json",
 
+                // Keep header for compatibility
                 "x-email-admin-secret":
                     secret
             },
@@ -108,6 +137,12 @@ async function sendCustomEmail({
 
                     type:
                         "custom",
+
+                    // IMPORTANT:
+                    // send-otp.js custom branch
+                    // checks body.admin_secret
+                    admin_secret:
+                        secret,
 
                     email:
                         email,
@@ -131,7 +166,8 @@ async function sendCustomEmail({
 
 
     const result =
-        await response.json()
+        await response
+            .json()
             .catch(() => ({}));
 
 
@@ -150,19 +186,6 @@ async function sendCustomEmail({
 
 
     return result;
-}
-
-
-// =====================================================
-// HASH PRIVATE KEY
-// =====================================================
-
-function hashPrivateKey(key) {
-
-    return crypto
-        .createHash("sha256")
-        .update(key)
-        .digest("hex");
 }
 
 
@@ -468,10 +491,9 @@ module.exports = async function handler(req, res) {
 
 
             // -------------------------------------------------
-            // STORE PRIVATE KEY INFORMATION
+            // SAVE PRIVATE KEY RECORD
             //
             // RAW KEY IS NEVER STORED.
-            // Only SHA-256 hash is stored.
             // -------------------------------------------------
 
             const privateKeyData = {
@@ -497,7 +519,7 @@ module.exports = async function handler(req, res) {
 
 
             // -------------------------------------------------
-            // UPDATE VERIFICATION REQUEST
+            // UPDATE REQUEST
             // -------------------------------------------------
 
             await requestRef.update({
@@ -527,7 +549,10 @@ module.exports = async function handler(req, res) {
                     true,
 
                 verification_key_hash:
-                    privateKeyHash
+                    privateKeyHash,
+
+                verification_email_status:
+                    "pending"
 
             });
 
@@ -540,10 +565,9 @@ module.exports = async function handler(req, res) {
             // verified: true
             // verify: true
             //
-            // The Appnetick app will activate the badge
-            // only after the user enters the private key.
+            // Badge will activate only after
+            // private key verification.
             // -------------------------------------------------
-
 
             await userRef.update({
 
@@ -557,7 +581,7 @@ module.exports = async function handler(req, res) {
 
 
             // -------------------------------------------------
-            // SAVE PRIVATE KEY RECORD
+            // SAVE PRIVATE KEY
             // -------------------------------------------------
 
             const keyRef =
@@ -572,7 +596,7 @@ module.exports = async function handler(req, res) {
 
 
             // -------------------------------------------------
-            // APPROVAL EMAIL
+            // SEND APPROVAL EMAIL
             // -------------------------------------------------
 
             try {
@@ -606,14 +630,6 @@ module.exports = async function handler(req, res) {
                     emailError
                 );
 
-
-                // -------------------------------------------------
-                // IMPORTANT
-                //
-                // Application remains approved, but mark
-                // email delivery as failed so admin/backend
-                // can retry later.
-                // -------------------------------------------------
 
                 await requestRef.update({
 
@@ -651,7 +667,7 @@ module.exports = async function handler(req, res) {
 
 
             // -------------------------------------------------
-            // EMAIL SUCCESS
+            // EMAIL SENT
             // -------------------------------------------------
 
             await requestRef.update({
@@ -660,7 +676,10 @@ module.exports = async function handler(req, res) {
                     "sent",
 
                 verification_email_sent_at:
-                    Date.now()
+                    Date.now(),
+
+                verification_email_error:
+                    ""
 
             });
 
@@ -711,7 +730,7 @@ module.exports = async function handler(req, res) {
 
 
         // -------------------------------------------------
-        // DO NOT GIVE VERIFIED BADGE
+        // KEEP BADGE DISABLED
         // -------------------------------------------------
 
         await userRef.update({
@@ -767,7 +786,10 @@ module.exports = async function handler(req, res) {
                         "sent",
 
                     verification_email_sent_at:
-                        Date.now()
+                        Date.now(),
+
+                    verification_email_error:
+                        ""
 
                 });
 
@@ -795,6 +817,10 @@ module.exports = async function handler(req, res) {
             }
         }
 
+
+        // =================================================
+        // REJECT RESPONSE
+        // =================================================
 
         return res
             .status(200)
