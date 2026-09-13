@@ -16,7 +16,6 @@ HELPERS
 ============================================================
 */
 
-
 function normalizeUsername(value) {
 
     return String(value || "")
@@ -34,9 +33,34 @@ function safeString(value) {
 }
 
 
+function getRequestBody(req) {
+
+    if (!req.body) {
+        return {};
+    }
+
+    if (typeof req.body === "string") {
+
+        try {
+
+            return JSON.parse(req.body);
+
+        } catch (error) {
+
+            return {};
+
+        }
+
+    }
+
+    return req.body || {};
+
+}
+
+
 /*
 ============================================================
-GENERATE 12 DIGIT STATUS CODE
+12 DIGIT STATUS CODE
 ============================================================
 */
 
@@ -46,22 +70,20 @@ function generateStatusCode() {
 
     while (result.length < 12) {
 
-        const bytes =
-            crypto.randomBytes(32);
+        const byte =
+            crypto.randomBytes(1)[0];
 
-        for (const byte of bytes) {
+        /*
+         * Avoid modulo bias.
+         */
 
-            if (byte >= 250) {
-                continue;
-            }
-
-            result += String(byte % 10);
-
-            if (result.length === 12) {
-                break;
-            }
-
+        if (byte >= 250) {
+            continue;
         }
+
+        result += String(
+            byte % 10
+        );
 
     }
 
@@ -72,7 +94,7 @@ function generateStatusCode() {
 
 /*
 ============================================================
-HASH STATUS CODE / PRIVATE KEY
+HASH
 ============================================================
 */
 
@@ -88,7 +110,7 @@ function hashValue(value) {
 
 /*
 ============================================================
-GENERATE REQUEST ID
+REQUEST ID
 ============================================================
 */
 
@@ -109,31 +131,24 @@ function generateRequestId() {
 ============================================================
 FIND USER
 ============================================================
-
-Priority:
-
-1. UsernameIndex/{username}
-2. Users/{uid}
-3. Firebase exact search
-4. Case-insensitive fallback
-
-============================================================
 */
-
 
 async function findUser(username) {
 
+    username =
+        normalizeUsername(username);
+
+
     /*
     --------------------------------------------------------
-    UsernameIndex
+    1. UsernameIndex
     --------------------------------------------------------
     */
 
     const indexSnapshot =
         await usersDB
             .ref(
-                "UsernameIndex/" +
-                username
+                `UsernameIndex/${username}`
             )
             .once("value");
 
@@ -146,16 +161,16 @@ async function findUser(username) {
     ) {
 
         uid =
-            String(
+            safeString(
                 indexSnapshot.val()
-            ).trim();
+            );
 
     }
 
 
     /*
     --------------------------------------------------------
-    Load user directly
+    2. Direct Users/{uid}
     --------------------------------------------------------
     */
 
@@ -164,8 +179,7 @@ async function findUser(username) {
         const userSnapshot =
             await usersDB
                 .ref(
-                    "Users/" +
-                    uid
+                    `Users/${uid}`
                 )
                 .once("value");
 
@@ -214,7 +228,7 @@ async function findUser(username) {
 
     /*
     --------------------------------------------------------
-    Firebase indexed search
+    3. Exact Firebase search
     --------------------------------------------------------
     */
 
@@ -276,15 +290,13 @@ async function findUser(username) {
 
 
     if (user) {
-
         return user;
-
     }
 
 
     /*
     --------------------------------------------------------
-    Case-insensitive fallback
+    4. Case-insensitive fallback
     --------------------------------------------------------
     */
 
@@ -364,27 +376,19 @@ async function findUser(username) {
 SAFE VERIFICATION DATA
 ============================================================
 
-NEVER return:
+Never expose:
 
+- private verification key
 - verification_key_hash
 - status code hash
-- private key
-- email
-- internal UID mapping
-- key record
-
+- internal key record
 ============================================================
 */
 
-
-function safeVerificationData(
-    value
-) {
+function safeVerificationData(value) {
 
     if (!value) {
-
         return null;
-
     }
 
 
@@ -415,7 +419,10 @@ function safeVerificationData(
             "",
 
         verification_key_redeemed:
-            value.verification_key_redeemed === true
+            value.verification_key_redeemed === true,
+
+        verification_key_active:
+            value.verification_key_active === true
 
     };
 
@@ -428,7 +435,6 @@ SEND CUSTOM EMAIL
 ============================================================
 */
 
-
 async function sendCustomEmail({
     email,
     subject,
@@ -439,11 +445,9 @@ async function sendCustomEmail({
 }) {
 
     const appBaseUrl =
-        String(
-            process.env.APP_BASE_URL ||
-            ""
+        safeString(
+            process.env.APP_BASE_URL
         )
-        .trim()
         .replace(/\/+$/, "");
 
 
@@ -455,7 +459,9 @@ async function sendCustomEmail({
         endpoint =
             `${appBaseUrl}/api/send-otp`;
 
-    } else if (process.env.VERCEL_URL) {
+    } else if (
+        process.env.VERCEL_URL
+    ) {
 
         endpoint =
             `https://${process.env.VERCEL_URL}/api/send-otp`;
@@ -464,7 +470,9 @@ async function sendCustomEmail({
 
 
     const secret =
-        process.env.EMAIL_ADMIN_SECRET;
+        safeString(
+            process.env.EMAIL_ADMIN_SECRET
+        );
 
 
     if (!secret) {
@@ -497,8 +505,8 @@ async function sendCustomEmail({
                     "Content-Type":
                         "application/json",
 
-                    "x-email-admin-secret":
-                        secret
+                    "Accept":
+                        "application/json"
 
                 },
 
@@ -507,6 +515,11 @@ async function sendCustomEmail({
 
                         type:
                             "custom",
+
+                        /*
+                         * send-otp.js custom branch
+                         * checks this value.
+                         */
 
                         admin_secret:
                             secret,
@@ -546,7 +559,7 @@ async function sendCustomEmail({
     if (!response.ok) {
 
         console.error(
-            "Verification custom email error:",
+            "Verification email error:",
             result
         );
 
@@ -568,7 +581,6 @@ async function sendCustomEmail({
 MAIN HANDLER
 ============================================================
 */
-
 
 module.exports =
     async function handler(
@@ -594,7 +606,7 @@ module.exports =
 
     /*
     ========================================================
-    DETERMINE ACTION
+    ACTION
     ========================================================
     */
 
@@ -615,7 +627,6 @@ module.exports =
     if (
         action === "check-username"
     ) {
-
 
         if (
             req.method !== "GET"
@@ -642,7 +653,6 @@ module.exports =
 
 
             if (
-                !username ||
                 typeof username !== "string"
             ) {
 
@@ -668,6 +678,7 @@ module.exports =
 
             if (
                 !username ||
+                username.length < 3 ||
                 username.length > 50
             ) {
 
@@ -676,6 +687,9 @@ module.exports =
                     .json({
 
                         success:false,
+
+                        code:
+                            "INVALID_USERNAME",
 
                         error:
                             "Invalid username."
@@ -761,7 +775,7 @@ module.exports =
                     success:false,
 
                     error:
-                        "Internal server error."
+                        "Unable to check username."
 
                 });
 
@@ -777,56 +791,25 @@ module.exports =
 
     GET:
 
-    /api/verification/status?status_code=123456789012
+    /api/verification?action=status&status_code=123456789012
 
     ========================================================
     */
 
     if (
-        action === "status" ||
-        (
-            action === "" &&
-            req.method === "GET"
-        )
+        action === "status" &&
+        req.method === "GET"
     ) {
-
-
-        if (
-            req.method !== "GET"
-        ) {
-
-            return res
-                .status(405)
-                .json({
-
-                    success:false,
-
-                    error:
-                        "Method not allowed."
-
-                });
-
-        }
-
 
         try {
 
-            /*
-            ------------------------------------------------
-            STATUS CODE
-            ------------------------------------------------
-            */
-
-            const rawStatusCode =
-                typeof req.query.status_code === "string"
-                    ? req.query.status_code
-                    : "";
-
-
             const statusCode =
-                rawStatusCode
-                    .replace(/\D/g, "")
-                    .slice(0, 12);
+                String(
+                    req.query.status_code ||
+                    ""
+                )
+                .replace(/\D/g, "")
+                .slice(0, 12);
 
 
             if (
@@ -847,28 +830,16 @@ module.exports =
             }
 
 
-            /*
-            ------------------------------------------------
-            HASH STATUS CODE
-            ------------------------------------------------
-            */
-
-            const statusCodeHash =
+            const statusHash =
                 hashValue(
                     statusCode
                 );
 
 
-            /*
-            ------------------------------------------------
-            FIND STATUS CODE RECORD
-            ------------------------------------------------
-            */
-
             const codeSnapshot =
                 await dataDB
                     .ref(
-                        `VerificationStatusCodes/${statusCodeHash}`
+                        `VerificationStatusCodes/${statusHash}`
                     )
                     .once("value");
 
@@ -928,12 +899,6 @@ module.exports =
             }
 
 
-            /*
-            ------------------------------------------------
-            LOAD REQUEST
-            ------------------------------------------------
-            */
-
             const verificationSnapshot =
                 await dataDB
                     .ref(
@@ -966,12 +931,6 @@ module.exports =
                 verificationSnapshot.val() || {};
 
 
-            /*
-            ------------------------------------------------
-            REQUEST ID VALIDATION
-            ------------------------------------------------
-            */
-
             if (
                 String(
                     verificationData.request_id ||
@@ -992,12 +951,6 @@ module.exports =
 
             }
 
-
-            /*
-            ------------------------------------------------
-            LOAD USER
-            ------------------------------------------------
-            */
 
             const userSnapshot =
                 await usersDB
@@ -1058,24 +1011,6 @@ module.exports =
             };
 
 
-            /*
-            ------------------------------------------------
-            SAFE VERIFICATION
-            ------------------------------------------------
-            */
-
-            const safeVerification =
-                safeVerificationData(
-                    verificationData
-                );
-
-
-            /*
-            ------------------------------------------------
-            RESPONSE
-            ------------------------------------------------
-            */
-
             return res
                 .status(200)
                 .json({
@@ -1088,7 +1023,9 @@ module.exports =
                         safeUser,
 
                     verification:
-                        safeVerification
+                        safeVerificationData(
+                            verificationData
+                        )
 
                 });
 
@@ -1119,17 +1056,16 @@ module.exports =
 
     /*
     ========================================================
-    ACTIVATE VERIFICATION
+    ACTIVATE VERIFICATION KEY
     ========================================================
 
     POST:
 
-    /api/verification/status
+    /api/verification?action=activate
 
     Body:
 
     {
-        action:"activate",
         status_code:"123456789012",
         verification_key:"123456789012345678"
     }
@@ -1138,45 +1074,14 @@ module.exports =
     */
 
     if (
-        req.method === "POST" &&
-        (
-            action === "status" ||
-            action === ""
-        )
+        action === "activate" &&
+        req.method === "POST"
     ) {
-
 
         try {
 
             const body =
-                req.body || {};
-
-
-            const requestedAction =
-                typeof body.action === "string"
-                    ? body.action
-                        .trim()
-                        .toLowerCase()
-                    : "";
-
-
-            if (
-                requestedAction !==
-                "activate"
-            ) {
-
-                return res
-                    .status(400)
-                    .json({
-
-                        success:false,
-
-                        error:
-                            "Invalid verification action."
-
-                    });
-
-            }
+                getRequestBody(req);
 
 
             /*
@@ -1247,26 +1152,20 @@ module.exports =
 
             /*
             ------------------------------------------------
-            HASH STATUS CODE
+            FIND STATUS CODE
             ------------------------------------------------
             */
 
-            const statusCodeHash =
+            const statusHash =
                 hashValue(
                     statusCode
                 );
 
 
-            /*
-            ------------------------------------------------
-            FIND STATUS CODE
-            ------------------------------------------------
-            */
-
             const codeSnapshot =
                 await dataDB
                     .ref(
-                        `VerificationStatusCodes/${statusCodeHash}`
+                        `VerificationStatusCodes/${statusHash}`
                     )
                     .once("value");
 
@@ -1364,7 +1263,7 @@ module.exports =
 
             /*
             ------------------------------------------------
-            REQUEST ID CHECK
+            REQUEST MATCH
             ------------------------------------------------
             */
 
@@ -1391,7 +1290,7 @@ module.exports =
 
             /*
             ------------------------------------------------
-            STATUS CHECK
+            APPROVED CHECK
             ------------------------------------------------
             */
 
@@ -1405,8 +1304,7 @@ module.exports =
 
 
             if (
-                currentStatus !==
-                "approved"
+                currentStatus !== "approved"
             ) {
 
                 return res
@@ -1414,6 +1312,9 @@ module.exports =
                     .json({
 
                         success:false,
+
+                        code:
+                            "NOT_APPROVED",
 
                         error:
                             "Your verification application has not been approved yet."
@@ -1425,7 +1326,7 @@ module.exports =
 
             /*
             ------------------------------------------------
-            ALREADY REDEEMED
+            KEY USED CHECK
             ------------------------------------------------
             */
 
@@ -1458,8 +1359,8 @@ module.exports =
             */
 
             if (
-                requestData.verification_key_active ===
-                false
+                requestData.verification_key_active !==
+                true
             ) {
 
                 return res
@@ -1482,45 +1383,41 @@ module.exports =
             ------------------------------------------------
             */
 
-            const enteredKeyHash =
+            const enteredHash =
                 hashValue(
                     privateKey
                 );
 
 
-            const storedKeyHash =
+            const storedHash =
                 safeString(
                     requestData.verification_key_hash
                 );
 
 
-            /*
-            ------------------------------------------------
-            CONSTANT-TIME HASH COMPARISON
-            ------------------------------------------------
-            */
-
             let keyMatches = false;
 
 
             if (
-                storedKeyHash &&
-                storedKeyHash.length === 64 &&
-                enteredKeyHash.length === 64
+                storedHash.length === 64 &&
+                enteredHash.length === 64
             ) {
 
                 try {
 
                     keyMatches =
                         crypto.timingSafeEqual(
+
                             Buffer.from(
-                                enteredKeyHash,
+                                enteredHash,
                                 "hex"
                             ),
+
                             Buffer.from(
-                                storedKeyHash,
+                                storedHash,
                                 "hex"
                             )
+
                         );
 
                 } catch(error) {
@@ -1556,7 +1453,7 @@ module.exports =
 
             /*
             ------------------------------------------------
-            LOAD USER
+            USER
             ------------------------------------------------
             */
 
@@ -1594,7 +1491,7 @@ module.exports =
 
             /*
             =================================================
-            ACTIVATE BADGE
+            ACTIVATE USER BADGE
             =================================================
             */
 
@@ -1617,7 +1514,7 @@ module.exports =
 
             /*
             =================================================
-            MARK KEY AS USED
+            MARK KEY REDEEMED
             =================================================
             */
 
@@ -1642,14 +1539,14 @@ module.exports =
 
 
             /*
-            ------------------------------------------------
-            DISABLE STATUS CODE FOR FUTURE ACTIVATION
-            ------------------------------------------------
+            =================================================
+            DISABLE STATUS CODE FOR ACTIVATION
+            =================================================
             */
 
             await dataDB
                 .ref(
-                    `VerificationStatusCodes/${statusCodeHash}`
+                    `VerificationStatusCodes/${statusHash}`
                 )
                 .update({
 
@@ -1714,38 +1611,19 @@ module.exports =
 
     /*
     ========================================================
-    SUBMIT
+    SUBMIT APPLICATION
     ========================================================
     */
 
-
     if (
-        action === "submit"
+        action === "submit" &&
+        req.method === "POST"
     ) {
-
-
-        if (
-            req.method !== "POST"
-        ) {
-
-            return res
-                .status(405)
-                .json({
-
-                    success:false,
-
-                    error:
-                        "Method not allowed."
-
-                });
-
-        }
-
 
         try {
 
             const body =
-                req.body || {};
+                getRequestBody(req);
 
 
             /*
@@ -1768,6 +1646,9 @@ module.exports =
 
                         success:false,
 
+                        code:
+                            "INVALID_USERNAME",
+
                         error:
                             "Username is required."
 
@@ -1777,6 +1658,7 @@ module.exports =
 
 
             if (
+                username.length < 3 ||
                 username.length > 50
             ) {
 
@@ -1785,6 +1667,9 @@ module.exports =
                     .json({
 
                         success:false,
+
+                        code:
+                            "INVALID_USERNAME",
 
                         error:
                             "Invalid username."
@@ -1796,7 +1681,7 @@ module.exports =
 
             /*
             ------------------------------------------------
-            FIND ACTUAL USER
+            FIND REAL USER
             ------------------------------------------------
             */
 
@@ -1814,8 +1699,38 @@ module.exports =
 
                         success:false,
 
+                        code:
+                            "USERNAME_NOT_FOUND",
+
                         error:
-                            "Username not found."
+                            "No Appnetick account was found with this username."
+
+                    });
+
+            }
+
+
+            /*
+            ------------------------------------------------
+            ALREADY VERIFIED
+            ------------------------------------------------
+            */
+
+            if (
+                actualUser.verified
+            ) {
+
+                return res
+                    .status(409)
+                    .json({
+
+                        success:false,
+
+                        code:
+                            "ALREADY_APPROVED",
+
+                        error:
+                            "This Appnetick account is already verified."
 
                     });
 
@@ -1828,12 +1743,14 @@ module.exports =
             ------------------------------------------------
             */
 
+            const requestRef =
+                dataDB.ref(
+                    `VerificationRequests/${actualUser.uid}`
+                );
+
+
             const existingSnapshot =
-                await dataDB
-                    .ref(
-                        `VerificationRequests/${actualUser.uid}`
-                    )
-                    .once("value");
+                await requestRef.once("value");
 
 
             if (
@@ -1854,30 +1771,7 @@ module.exports =
 
 
                 if (
-                    existingStatus ===
-                    "approved"
-                ) {
-
-                    return res
-                        .status(409)
-                        .json({
-
-                            success:false,
-
-                            code:
-                                "ALREADY_APPROVED",
-
-                            error:
-                                "This account already has an approved verification application."
-
-                        });
-
-                }
-
-
-                if (
-                    existingStatus ===
-                    "pending"
+                    existingStatus === "pending"
                 ) {
 
                     return res
@@ -1891,6 +1785,27 @@ module.exports =
 
                             error:
                                 "A verification application is already under review."
+
+                        });
+
+                }
+
+
+                if (
+                    existingStatus === "approved"
+                ) {
+
+                    return res
+                        .status(409)
+                        .json({
+
+                            success:false,
+
+                            code:
+                                "ALREADY_APPROVED",
+
+                            error:
+                                "This account already has an approved verification application."
 
                         });
 
@@ -1927,11 +1842,10 @@ module.exports =
 
             /*
             =================================================
-            EMAIL
+            ACCOUNT EMAIL
             =================================================
 
-            Email is taken from the real Users record.
-            Frontend email is NOT trusted.
+            The email from Users is authoritative.
 
             =================================================
             */
@@ -1939,16 +1853,25 @@ module.exports =
             const applicantEmail =
                 safeString(
                     actualUser.email
-                );
+                )
+                .toLowerCase();
 
 
-            if (!applicantEmail) {
+            if (
+                !applicantEmail ||
+                !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+                    applicantEmail
+                )
+            ) {
 
                 return res
                     .status(400)
                     .json({
 
                         success:false,
+
+                        code:
+                            "ACCOUNT_EMAIL_MISSING",
 
                         error:
                             "The Appnetick account does not have a valid email address."
@@ -1968,7 +1891,7 @@ module.exports =
                 generateStatusCode();
 
 
-            const statusCodeHash =
+            const statusHash =
                 hashValue(
                     statusCode
                 );
@@ -1984,7 +1907,7 @@ module.exports =
 
             /*
             =================================================
-            VERIFICATION DATA
+            VERIFICATION REQUEST
             =================================================
             */
 
@@ -2099,6 +2022,11 @@ module.exports =
                 rejection_reason:
                     "",
 
+                /*
+                 * Private verification key fields.
+                 * These will be filled only after admin approval.
+                 */
+
                 verification_key_status:
                     "",
 
@@ -2121,7 +2049,13 @@ module.exports =
                     0,
 
                 verification_email_status:
-                    "pending"
+                    "pending",
+
+                verification_email_sent_at:
+                    0,
+
+                verification_email_error:
+                    ""
 
             };
 
@@ -2132,13 +2066,9 @@ module.exports =
             =================================================
             */
 
-            await dataDB
-                .ref(
-                    `VerificationRequests/${actualUser.uid}`
-                )
-                .set(
-                    verificationData
-                );
+            await requestRef.set(
+                verificationData
+            );
 
 
             /*
@@ -2146,14 +2076,14 @@ module.exports =
             SAVE STATUS CODE MAPPING
             =================================================
 
-            Raw 12-digit code is NEVER stored.
+            Raw code is NEVER stored.
 
             =================================================
             */
 
             await dataDB
                 .ref(
-                    `VerificationStatusCodes/${statusCodeHash}`
+                    `VerificationStatusCodes/${statusHash}`
                 )
                 .set({
 
@@ -2177,7 +2107,7 @@ module.exports =
 
             /*
             =================================================
-            SEND STATUS CODE EMAIL
+            SEND STATUS EMAIL
             =================================================
             */
 
@@ -2195,33 +2125,29 @@ module.exports =
                         "Verification Application Submitted",
 
                     message:
-                        "Your Appnetick verification application has been submitted successfully. Use the 12-digit status code below to check your application status on the Appnetick verification status page.",
+                        "Your Appnetick verification application has been submitted successfully. Your application is now pending review. Use the private 12-digit status code below to check the status of your application.",
 
                     details:
                         `Verification Status Code: ${statusCode}`,
 
                     footer_message:
-                        "Keep this status code secure. If your application is approved, you will receive a separate email containing your 18-digit private verification key."
+                        "Keep this status code secure. If your application is approved, Appnetick will send a separate email containing your 18-digit private verification key."
 
                 });
 
 
-                await dataDB
-                    .ref(
-                        `VerificationRequests/${actualUser.uid}`
-                    )
-                    .update({
+                await requestRef.update({
 
-                        verification_email_status:
-                            "sent",
+                    verification_email_status:
+                        "sent",
 
-                        verification_email_sent_at:
-                            Date.now(),
+                    verification_email_sent_at:
+                        Date.now(),
 
-                        verification_email_error:
-                            ""
+                    verification_email_error:
+                        ""
 
-                    });
+                });
 
 
             } catch(emailError) {
@@ -2232,35 +2158,25 @@ module.exports =
                 );
 
 
-                await dataDB
-                    .ref(
-                        `VerificationRequests/${actualUser.uid}`
-                    )
-                    .update({
+                await requestRef.update({
 
-                        verification_email_status:
-                            "failed",
+                    verification_email_status:
+                        "failed",
 
-                        verification_email_error:
-                            String(
-                                emailError.message ||
-                                "Email failed"
-                            )
+                    verification_email_error:
+                        safeString(
+                            emailError.message
+                        )
 
-                    });
+                });
 
 
                 /*
                 ------------------------------------------------
-                IMPORTANT
+                Application remains saved.
                 ------------------------------------------------
 
-                Application is still saved.
-
-                Return the status code ONCE so the frontend
-                can show it to the applicant if email fails.
-
-                ------------------------------------------------
+                Return code once because email failed.
                 */
 
                 return res
@@ -2268,9 +2184,6 @@ module.exports =
                     .json({
 
                         success:true,
-
-                        uid:
-                            actualUser.uid,
 
                         username:
                             actualUser.username,
@@ -2285,7 +2198,7 @@ module.exports =
                             statusCode,
 
                         message:
-                            "Verification application submitted, but the status code email could not be sent. Please save the status code shown here."
+                            "Application submitted, but the status code email could not be sent. Please save your status code."
 
                     });
 
@@ -2304,9 +2217,6 @@ module.exports =
 
                     success:true,
 
-                    uid:
-                        actualUser.uid,
-
                     username:
                         actualUser.username,
 
@@ -2324,11 +2234,23 @@ module.exports =
 
         } catch(error) {
 
+            /*
+            ------------------------------------------------
+            SERVER LOG
+            ------------------------------------------------
+            */
+
             console.error(
-                "verification submit:",
+                "verification submit ERROR:",
                 error
             );
 
+
+            /*
+            ------------------------------------------------
+            Do NOT expose Firebase internals to client.
+            ------------------------------------------------
+            */
 
             return res
                 .status(500)
@@ -2336,12 +2258,41 @@ module.exports =
 
                     success:false,
 
+                    code:
+                        "SUBMIT_FAILED",
+
                     error:
                         "Unable to submit verification application."
 
                 });
 
         }
+
+    }
+
+
+    /*
+    ========================================================
+    METHOD NOT ALLOWED
+    ========================================================
+    */
+
+    if (
+        action === "status" ||
+        action === "activate" ||
+        action === "submit"
+    ) {
+
+        return res
+            .status(405)
+            .json({
+
+                success:false,
+
+                error:
+                    "Method not allowed."
+
+            });
 
     }
 
